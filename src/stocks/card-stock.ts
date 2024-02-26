@@ -51,6 +51,13 @@ interface RemoveCardSettings {
 
 type CardSelectionMode = 'none' | 'single' | 'multiple';
 
+class CardPosition {
+	elem: HTMLElement;
+	x: number;
+	y: number;
+	animation: Animation;
+}
+
 /**
  * The abstract stock. It shouldn't be used directly, use stocks that extends it.
  */
@@ -59,6 +66,7 @@ class CardStock<T> {
     protected selectedCards: T[] = [];
     protected selectionMode: CardSelectionMode = 'none';
     protected sort?: SortFunction; 
+	protected cardPositions: {[id: string]: CardPosition} = {};
 
     /**
      * Called when selection change. Returns the selection.
@@ -165,6 +173,8 @@ class CardStock<T> {
             return Promise.resolve(false);
         }
 
+		this.rememberExistingCardPositions();
+
         let promise: Promise<boolean>;
 
         // we check if card is in a stock
@@ -231,6 +241,8 @@ class CardStock<T> {
             // make selectable only at the end of the animation
             promise.then(() => this.setSelectableCard(card, settingsWithIndex.selectable ?? true));
         }
+
+		this.slideExistingCardsToPlace();
 
         return promise;
     }
@@ -367,7 +379,10 @@ class CardStock<T> {
     public removeCard(card: T, settings?: RemoveCardSettings): Promise<boolean> {
         let promise;
         if (this.contains(card) && this.element.contains(this.getCardElement(card))) {
+			delete this.cardPositions[this.manager.getId(card)];
+			this.rememberExistingCardPositions();
             promise = this.manager.removeCard(card, settings);
+			this.slideExistingCardsToPlace();
         } else {
             promise = Promise.resolve(false);
         }
@@ -657,4 +672,49 @@ class CardStock<T> {
 
         cardElement?.classList.remove(selectableCardsClass, unselectableCardsClass, selectedCardsClass);
     }
+
+	protected rememberExistingCardPositions() {
+		for (let c of this.cards) {
+			let cardId = this.manager.getId(c);
+			let pos: CardPosition;
+			let rect: DOMRect = null;
+			if (pos = this.cardPositions[cardId]) {
+				if (pos.animation) {
+					rect = pos.elem.getBoundingClientRect();
+					pos.animation.cancel();
+				}
+			} else {
+				pos = new CardPosition();
+				pos.elem = this.getCardElement(c);
+				this.cardPositions[cardId] = pos;
+			}
+			if (!rect) {
+				rect = pos.elem.getBoundingClientRect();
+			}
+			pos.x = rect.left;
+			pos.y = rect.top;
+		}
+	}
+
+	protected slideExistingCardsToPlace() {
+		for (let [cardId, pos] of Object.entries(this.cardPositions)) {
+			const rect = pos.elem.getBoundingClientRect();
+
+			const translateX = pos.x - rect.left;
+			const translateY = pos.y - rect.top;
+
+			let origTransform = pos.elem.style.transform;
+
+			pos.animation = pos.elem.animate(
+			  [
+				{transform: `translate(${translateX}px, ${translateY}px) ${origTransform}`},
+				{transform: origTransform ? origTransform : 'none'},
+			  ],
+			  {
+				duration: 500, // Change to high value to test animation
+				easing: 'ease-out',
+			  }
+			);
+		}
+	}
 }
